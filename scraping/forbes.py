@@ -1,96 +1,75 @@
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
+from bs4 import BeautifulSoup
+import requests
+from datetime import datetime
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import time
 
-
-def forbes_scrape(entity, start_date, end_date):
+def forbes_scrape(entity, start_date, end_date):  
+    # remove all ' ' characters in url
     entity = entity.replace(' ','+')
 
-    driver = webdriver.Chrome('./utils/chromedriver')
+    # store data
+    data = {'date_time':[], 'title':[], 'excerpt':[], 'article_url':[], 'image_url':[], 'author':[], 'author_url':[], 'source_id': []}
 
+    page_num = 0
+    last_date = end_date
 
-    data = {'date_time':[], 'title':[], 'excerpt':[], 'article_url':[], 'author':[], 'author_url':[]}
-    url = 'https://www.forbes.com/search/?q='+ entity + '&sort=recent'
+    # iterate through all the pages there are 
+    while last_date >= start_date:
+        start_page = page_num*20
 
-    driver.get(url)
+        url = 'https://www.forbes.com/simple-data/search/more/?start=' + str(start_page) + '&sort=recent&q=' + entity
+        page = requests.get(url).text
+        soup = BeautifulSoup(page, 'html.parser')
+        
+        results = soup.find_all('article')
 
-    articles = driver.find_elements_by_tag_name("article")
+        if results == []:
+            break
+        else:
+            for res in results:
+                # get the date of the article
+                timestamp_info = res.find('div', class_ = 'stream-item__date')
+                timestamp = int(timestamp_info['data-date'])
+                date_time = datetime.fromtimestamp(timestamp/1000)  
+                last_date = date_time # update current date
 
-    if len(articles) > 0: 
-        #Get the date of the last article
-        last_article = articles[-1]
-        timestamp_info = last_article.find_element_by_class_name('stream-item__date')
-        timestamp = int(timestamp_info.get_attribute('data-date'))
-        last_date = datetime.fromtimestamp(timestamp/1000)
-        # print(last_date)
+                if date_time <= end_date and date_time >= start_date:
+                    # store info in dataframe if it lies in the date range 
+                    title_info = res.find("a", class_ = "stream-item__title")
+                    title = title_info.text
+                    data['title'].append(title)
 
+                    article_url = title_info["href"]
 
-        #While date of last article on page is after start_date, loop     
-        while last_date >= start_date:
-            #try to locate the search more button and click
-            try:
-                load_more = driver.find_element_by_class_name("search-more")
-                load_more.click()
-                time.sleep(3)
-                articles = driver.find_elements_by_tag_name("article")
+                    data['article_url'].append(article_url)
 
-                #Get the date of the article
-                last_article = articles[-1]
-                timestamp_info = last_article.find_element_by_class_name('stream-item__date')
-                timestamp = int(timestamp_info.get_attribute('data-date'))
-                last_date = datetime.fromtimestamp(timestamp/1000)        
+                    description = res.find("div", "stream-item__description").text
+                    data['excerpt'].append(description)
 
-            #If cannot locate search more, stop loop
-            except:
-                break
-                
-            
+                    author_info = res.find("a", "byline__author-name")
+                    author = author_info.text
+                    data['author'].append(author)
 
-        for res in articles:
-            #Get the date of the article
-            timestamp_info = res.find_element_by_class_name('stream-item__date')
-            timestamp = int(timestamp_info.get_attribute('data-date'))
-            date_time = datetime.fromtimestamp(timestamp/1000)    
+                    author_url = author_info["href"]
+                    data['author_url'].append(author_url)
 
-            #Store info in dataframe if it lies in the date range 
-            if (date_time >= start_date and date_time <= end_date):
-                title_info = res.find_element_by_class_name("stream-item__title")
-                title = title_info.text.lower()
-                data['title'].append(title)
+                    data['date_time'].append(date_time)
 
-                article_url = title_info.get_attribute("href")
-                data['article_url'].append(article_url)
+                    data['image_url'] = ''
 
-                description = res.find_element_by_class_name("stream-item__description").text.lower()
-                data['excerpt'].append(description)
+                    source_id = res["data-id"]
+                    data['source_id'].append(source_id)
 
-                author_info = res.find_element_by_class_name("byline__author-name")
-                author = author_info.text.lower()
-                data['author'].append(author)
+            page_num += 1
 
-                author_url = author_info.get_attribute("href")
-                data['author_url'].append(author_url)
-
-                data['date_time'].append(date_time)
-
-      
-    driver.quit()
-
-    #Generate dataframe with relevant data
     df = pd.DataFrame(data)
-    
     return df
 
 
-###############Test###############
-##entity = 'bitcoin'
-##start_date = datetime(2020,8,20)
-##end_date = datetime(2020,8,29)
-##df = forbes_scrape(entity, start_date, end_date)
-##################################
-
-
-
+############### Testing ################
+# entity = 'binance'
+# start_date = datetime(2020,6, 3)
+# end_date = datetime(2020,8, 30, 23, 59, 59)
+# df = forbes_scrape(entity, start_date, end_date)
+######################################
